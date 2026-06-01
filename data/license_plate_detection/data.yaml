@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['License_Plate']
+
+roboflow:
+  workspace: lewis-wright-qj9d1
+  project: license-plate-recognition-rxg4e
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/lewis-wright-qj9d1/license-plate-recognition-rxg4e/dataset/1

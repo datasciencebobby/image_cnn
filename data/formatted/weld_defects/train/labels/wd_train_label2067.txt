@@ -1,0 +1,2 @@
+class x_center y_center width height
+7 0.778154 0.943765 0.062659 0.083130

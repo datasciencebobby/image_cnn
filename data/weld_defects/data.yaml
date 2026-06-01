@@ -1,0 +1,13 @@
+train: train/images
+val: valid/images
+test: test/images
+
+names: 
+  0: air hole
+  1: bite edge
+  2: broken arc
+  3: crack
+  4: hollow bead
+  5: overlap
+  6: slag inclusion
+  7: unfused
