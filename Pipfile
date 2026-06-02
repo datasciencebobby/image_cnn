@@ -21,6 +21,8 @@ transformers = "*"
 scikit-image = "*"
 torch = {version = "*", index = "downloadpytorch"}
 torchvision = {version = "*", index = "downloadpytorch"}
+torchmetrics = "*"
+pycocotools = "*"
 
 [dev-packages]
 
