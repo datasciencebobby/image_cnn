@@ -6,9 +6,6 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.transforms import functional as F
 from PIL import Image
 
-# ---------------------------------------------------------
-# 1. Custom Dataset (YOLO to PyTorch Converter)
-# ---------------------------------------------------------
 class YOLODataset(Dataset):
     def __init__(self, img_dir, label_dir):
         self.img_dir = img_dir
@@ -46,8 +43,6 @@ class YOLODataset(Dataset):
                     
                     boxes.append([x_min, y_min, x_max, y_max])
                     
-                    # CRITICAL: PyTorch requires class 0 to be background. 
-                    # Shift YOLO classes up by 1.
                     labels.append(int(class_id) + 1)
                     
         # Handle images with no objects
@@ -89,61 +84,58 @@ def main():
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
     print(f"Using device: {device}")
 
-    # --- CONFIGURATION ---
-    # Number of classes = your classes + 1 (for background)
-    # E.g., if you have 'cat', 'dog', 'bird' (3 classes), set this to 4.
+    if torch.device == "cuda":
+        NUM_WORKERS = 2
+    else:
+        NUM_WORKERS = 0
+
     NUM_CLASSES = 2 
-    BATCH_SIZE = 4
+    BATCH_SIZE = 5
     NUM_EPOCHS = 2
-    LEARNING_RATE = .00001
-    MODEL_SAVE_PATH = r"C:\Users\Installer\Documents\image_cnn\models\custom_faster_rcnn.pt"
-    #MODEL_SAVE_PATH = r"..\models\custom_faster_rcnn.pt"
+    LEARNING_RATE = .000001
+    LOSS_THRESHOLD = 0.02
+    MODEL_SAVE_PATH = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\models\custom_faster_rcnn.pt"
     
-    # --- DATA PREP ---
-    img_directory = r"..\data\formatted\license_plate_detection\random_train\images"
-    img_directory = r"C:\Users\Installer\Documents\image_cnn\data\formatted\license_plate_detection\random_train\images"
-    label_directory = r"..\data\formatted\license_plate_detection\random_train\labels"
-    label_directory = r"C:\Users\Installer\Documents\image_cnn\data\formatted\license_plate_detection\random_train\labels"
+    img_directory = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\formatted\license_plate_detection\random_train\images"
+    label_directory = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\formatted\license_plate_detection\random_train\labels"
+    
     dataset = YOLODataset(img_dir=img_directory, label_dir=label_directory)
     data_loader = DataLoader(
         dataset, 
         batch_size=BATCH_SIZE, 
         shuffle=True, 
-        num_workers=0, 
+        num_workers=NUM_WORKERS, 
         collate_fn=collate_fn # Crucial for object detection
     )
 
-    # --- MODEL & OPTIMIZER ---
     model = get_object_detection_model(NUM_CLASSES)
     model.to(device)
     
-    # Load previously trained weights if you want to continue training
     if os.path.exists(MODEL_SAVE_PATH):
         print(f"Loading existing model from {MODEL_SAVE_PATH} to continue training...")
         model.load_state_dict(torch.load(MODEL_SAVE_PATH, map_location=device))
     else:
         print("No previous weights found. Starting fresh from COCO base...")
 
-    # Construct an optimizer
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.Adam(params, lr=LEARNING_RATE)
+    avg_epoch_loss = 1
 
-    # --- TRAINING LOOP ---
+
     print("Starting training...")
     for epoch in range(NUM_EPOCHS):
-        model.train() # Set model to training mode
+        model.train()
         epoch_loss = 0
         
         for i, (images, targets) in enumerate(data_loader):
-            # Move images and targets to GPU/CPU
+            
+
             images = list(image.to(device) for image in images)
             targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
             
-            # Forward pass (Faster R-CNN returns a dictionary of losses during training)
             loss_dict = model(images, targets)
             losses = sum(loss for loss in loss_dict.values())
             
-            # Backward pass
             optimizer.zero_grad()
             losses.backward()
             optimizer.step()
@@ -152,10 +144,20 @@ def main():
             
             if i % 10 == 0:
                 print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] | Batch [{i}/{len(data_loader)}] | Loss: {losses.item():.4f}")
-                
-        print(f"--- Epoch {epoch+1} Completed | Average Loss: {epoch_loss/len(data_loader):.4f} ---")
 
-        # Save the model checkpoint after every epoch
+        
+        avg_epoch_loss = epoch_loss/len(data_loader)
+
+        if avg_epoch_loss < LOSS_THRESHOLD:
+            print(f"Early stopping triggered! Average loss ({avg_epoch_loss:.4f}) is below target threshold ({LOSS_THRESHOLD}).")
+            break
+                
+        
+        print(f"--- Epoch {epoch+1} Completed | Average Loss: {avg_epoch_loss:.4f} ---")
+
+        torch.save(model.state_dict(), MODEL_SAVE_PATH)
+        print(f"Model saved to {MODEL_SAVE_PATH}\n")
+
         torch.save(model.state_dict(), MODEL_SAVE_PATH)
         print(f"Model saved to {MODEL_SAVE_PATH}\n")
 
