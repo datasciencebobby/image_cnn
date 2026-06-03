@@ -23,6 +23,7 @@ torch = {version = "*", index = "downloadpytorch"}
 torchvision = {version = "*", index = "downloadpytorch"}
 torchmetrics = "*"
 pycocotools = "*"
+ultralytics = "*"
 
 [dev-packages]
 

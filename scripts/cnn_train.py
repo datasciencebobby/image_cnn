@@ -26,7 +26,7 @@ class YOLODataset(Dataset):
         w, h = image.size
         image_tensor = F.to_tensor(image)
         
-        label_name = img_name.replace('.jpg', '.txt')
+        label_name = os.path.splitext(img_name)[0] + '.txt'
         label_path = os.path.join(self.label_dir, label_name)
         
         boxes = []
@@ -35,18 +35,22 @@ class YOLODataset(Dataset):
         if os.path.exists(label_path):
             with open(label_path, 'r') as f:
                 for line in f.readlines():
-                    class_id, x_center, y_center, width, height = map(float, line.strip().split())
+                    parts = line.strip().split()
+                    if not parts:
+                        continue
+                    class_id, x_center, y_center, width, height = map(float, parts)
                     
-                    # convert YOLO format to pytorch format
                     x_min = (x_center - width / 2) * w
                     y_min = (y_center - height / 2) * h
                     x_max = (x_center + width / 2) * w
                     y_max = (y_center + height / 2) * h
                     
-                    boxes.append([x_min, y_min, x_max, y_max])
+                    if x_max > x_min and y_max > y_min:
+                        boxes.append([x_min, y_min, x_max, y_max])
+                        # 2. FIX: Shift 0 to 1 for standard PyTorch indexing
+                        labels.append(int(class_id) + 1) 
                     
-                    labels.append(int(class_id) + 1)
-                    
+        # 3. FIX: PyTorch Faster R-CNN expects empty tensors for background
         if len(boxes) == 0:
             boxes = torch.zeros((0, 4), dtype=torch.float32)
             labels = torch.zeros((0,), dtype=torch.int64)
@@ -121,7 +125,7 @@ def main(fp_dict, n_classes, batch_size, n_epochs, l_rate, loss_thresh):
 
     # determine how many parallel processes can be used
     if device.type == "cuda":
-        n_workers = 4
+        n_workers = 8
     else:
         n_workers = 2
     
@@ -161,7 +165,8 @@ def main(fp_dict, n_classes, batch_size, n_epochs, l_rate, loss_thresh):
 
     print("Starting training...\n")
 
-    best_map = get_current_map(val_loader, device, model, metric)
+    # best_map = get_current_map(val_loader, device, model, metric)
+    best_map = 0
 
     for epoch in range(n_epochs):
         
@@ -206,27 +211,28 @@ def main(fp_dict, n_classes, batch_size, n_epochs, l_rate, loss_thresh):
         print("Running validation inference...\n")
         
         # use torch.no_grad to validate model without updating weights
+        # use torch.no_grad to validate model without updating weights
         with torch.no_grad():
-
-            # loop through batches of images/bounding boxes in val_loader
             for images, targets in val_loader:
-
-                # load images to device
                 images = list(image.to(device) for image in images)
                 
-                # load targets to device
-                targets_formatted = []
-                for t in targets:
-                    targets_formatted.append({
-                        "boxes": t["boxes"].to(device),
-                        "labels": t["labels"].to(device)
-                    })
-                    
-                # run batch of images through model
+                # 1. Run inference on GPU
                 predictions = model(images)
-            
-                # update metric with batch prediction
-                metric.update(predictions, targets_formatted)
+                
+                # 2. Format targets and move them safely to CPU (No manual filtering)
+                targets_formatted = [
+                    {"boxes": t["boxes"].cpu(), "labels": t["labels"].cpu()} 
+                    for t in targets
+                ]
+                    
+                # 3. Format predictions and move them safely to CPU (No manual filtering)
+                predictions_formatted = [
+                    {"boxes": p["boxes"].cpu(), "scores": p["scores"].cpu(), "labels": p["labels"].cpu()} 
+                    for p in predictions
+                ]
+
+                # 4. Update metric natively
+                metric.update(predictions_formatted, targets_formatted)
 
         # compute metrics across batches
         metrics_result = metric.compute()
@@ -247,19 +253,13 @@ def main(fp_dict, n_classes, batch_size, n_epochs, l_rate, loss_thresh):
         # epoch summary
         print(f"Epoch {epoch+1}/{n_epochs} -> Train Loss: {avg_epoch_loss:.4f} | ")
 
-        if avg_epoch_loss < loss_thresh:
-            print(f"Early stopping triggered! Average loss ({avg_epoch_loss:.4f}) is below target threshold ({loss_thresh}).")
-            break
+
         
         print(f"--- Epoch {epoch+1} Completed | Average Loss: {avg_epoch_loss:.4f} ---")
 
-        if current_map > best_map:
-            print(f"mAP improved from {best_map:.4f} to {current_map:.4f}. Saving model...")
-            best_map = current_map
-            torch.save(model.state_dict(), model_save_path)
-        else:
-            print(f"mAP did not improve from {best_map:.4f}. Model not saved.")
-            print("\n")
+        print(f"mAP changed from {best_map:.4f} to {current_map:.4f}. Saving model...")
+        best_map = current_map
+        torch.save(model.state_dict(), model_save_path)
     
     
     return pd.DataFrame(final_metrics)
@@ -269,13 +269,13 @@ if __name__ == '__main__':
 
     model_save_path = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\models\lp_cnn.pt"
     
-    img_directory_train = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\formatted\license_plate_detection\random_train\images"
+    img_directory_train = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\train\images"
     
-    label_directory_train = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\formatted\license_plate_detection\random_train\labels"
+    label_directory_train = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\train\labels"
     
-    img_directory_val = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\formatted\license_plate_detection\random_validate\images"
+    img_directory_val = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\valid\images"
     
-    label_directory_val = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\formatted\license_plate_detection\random_validate\labels"
+    label_directory_val = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\data\valid\labels"
     
     fp_dict = {
         "model_save_path" : model_save_path,
@@ -284,15 +284,16 @@ if __name__ == '__main__':
         "img_val_dir": img_directory_val,
         "label_val_dir": label_directory_val
     }
-    
+
     run_metrics = main(
         fp_dict = fp_dict,
         n_classes=2, 
-        batch_size=4,
-        n_epochs=5, 
-        l_rate=0.0001,
+        batch_size=8,
+        n_epochs=10, 
+        l_rate=5e-4,
         loss_thresh=0.02
         )
     
     metric_fp = rf"C:\Users\{os.getlogin()}\Documents\image_cnn\training_results\metrics.csv"
+
     run_metrics.to_csv(metric_fp)
