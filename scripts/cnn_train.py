@@ -66,7 +66,6 @@ class YOLODataset(Dataset):
 def collate_fn(batch):
     return tuple(zip(*batch))
 
-
 def get_object_detection_model(num_classes):
     # load mobilenet_v3 model
     model = torchvision.models.detection.fasterrcnn_mobilenet_v3_large_320_fpn(weights="DEFAULT")
